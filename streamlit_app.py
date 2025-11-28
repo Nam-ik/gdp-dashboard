@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt # Thư viện để vẽ biểu đồ
+import io # Thư viện để xử lý dữ liệu hình ảnh trong bộ nhớ
+
 # NOTE: Để chạy được ứng dụng này với mô hình thực tế, bạn sẽ cần:
 # 1. Huấn luyện mô hình XGBoost (hoặc Random Forest) ngoài file này.
 # 2. Lưu mô hình (ví dụ: bằng joblib hoặc pickle).
@@ -16,12 +19,6 @@ st.markdown("Nhập thông tin bên dưới để đánh giá nguy cơ mắc b�
 
 # --- Thiết lập 2 cột chính cho đầu vào ---
 col1, col2 = st.columns(2)
-
-# ==============================================================================
-# BẢNG ÁNH XẠ CÁC GIÁ TRỊ ĐẦU VÀO VÀ ĐẶC TRƯNG MÔ HÌNH
-# ==============================================================================
-# Lưu ý: Các tên biến và giá trị ánh xạ phải khớp với cách bạn tiền xử lý dữ liệu
-# trong mô hình (ví dụ: One-Hot Encoding cho Gender, Label Encoding cho Stress Level)
 
 # ==============================================================================
 # CỘT 1: THÔNG TIN CƠ BẢN VÀ THAM SỐ SINH HỌC
@@ -146,11 +143,11 @@ def preprocess_input(input_data):
     feature_names = [
         'Age', 'Blood Pressure', 'Cholesterol Level', 'BMI', 'Sleep Hours', 
         'Fasting Blood Sugar', 
-        'Gender_Female', 'Gender_Male', # OHE cho Giới tính
-        'Smoking', 'Family Heart Disease', 'Diabetes', # Checkbox 1
-        'High Blood Pressure', 'Low HDL Cholesterol', 'High LDL Cholesterol', # Checkbox 2
-        'Exercise Habits_Low', 'Exercise Habits_Medium', 'Exercise Habits_High', # OHE cho Exercise Habits
-        'Stress Level_Low', 'Stress Level_Medium', 'Stress Level_High', # OHE cho Stress Level
+        'Gender_Female', 'Gender_Male', 
+        'Smoking', 'Family Heart Disease', 'Diabetes', 
+        'High Blood Pressure', 'Low HDL Cholesterol', 'High LDL Cholesterol',
+        'Exercise Habits_Low', 'Exercise Habits_Medium', 'Exercise Habits_High', 
+        'Stress Level_Low', 'Stress Level_Medium', 'Stress Level_High',
     ]
 
     # Khởi tạo ma trận đặc trưng với các giá trị 0
@@ -199,46 +196,121 @@ def preprocess_input(input_data):
     # Trả về mảng 2D sẵn sàng cho mô hình
     return X.reshape(1, -1), feature_names
 
-# Hàm mô phỏng dự đoán và giải thích
-def mock_predict_and_explain(model_name, features):
-    """Mô phỏng kết quả dự đoán và giải thích XAI."""
+def generate_mock_shap_plot(shap_values_dict):
+    """Generates a mock SHAP summary plot (horizontal bar chart)."""
     
-    # Dựa vào Tuổi và Cholesterol để mô phỏng nguy cơ
+    # Sort features based on absolute SHAP value magnitude
+    sorted_features = sorted(shap_values_dict.items(), key=lambda item: abs(item[1]), reverse=True)
+    
+    # Take the top 7 features
+    top_n = 7
+    top_features = sorted_features[:top_n]
+    
+    # Extract names and values for plotting
+    names = [f[0] for f in top_features]
+    values = [f[1] for f in top_features]
+    
+    # Determine colors for positive (risk increase) and negative (risk decrease)
+    # Giả sử giá trị SHAP dương -> Tăng nguy cơ (Đỏ); Giá trị SHAP âm -> Giảm nguy cơ (Xanh)
+    colors = ['red' if v > 0 else 'blue' for v in values]
+    
+    # Reverse order for plotting (most important at top)
+    names.reverse()
+    values.reverse()
+    colors.reverse()
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    # Plot bars
+    ax.barh(names, values, color=colors)
+    
+    # Add labels and title
+    ax.set_xlabel("Đóng góp vào Nguy cơ (Giá trị SHAP)")
+    ax.set_ylabel("Đặc trưng")
+    ax.set_title("7 Yếu tố Quan trọng nhất cho Dự đoán (Mô phỏng SHAP)")
+    
+    # Add custom legend for color interpretation
+    red_patch = plt.Rectangle((0, 0), 1, 1, fc="red", label='Tăng nguy cơ')
+    blue_patch = plt.Rectangle((0, 0), 1, 1, fc="blue", label='Giảm nguy cơ')
+    ax.legend(handles=[red_patch, blue_patch], loc='lower right', frameon=True)
+
+    # Use BytesIO to save the plot as an image in memory
+    buf = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format="png")
+    plt.close(fig) # Close the figure to free memory
+    
+    return buf
+
+def mock_predict_and_explain(model_name, features):
+    """Mô phỏng kết quả dự đoán, xác suất và giải thích XAI."""
+    
+    # Tên đặc trưng được sử dụng trong giải thích
+    feature_map = {
+        0: 'Tuổi', 1: 'Huyết áp', 2: 'Mức Cholesterol', 3: 'BMI', 
+        8: 'Hút thuốc', 11: 'Cao huyết áp', 16: 'Tập thể dục Cao', 18: 'Stress Trung bình'
+    }
+    
+    # Trích xuất các giá trị quan trọng cho mô phỏng
     age = features[0]
+    bp = features[1]
     cholesterol = features[2]
+    smoking = features[8]
+    exercise_high = features[16]
+    high_bp_flag = features[11]
     
     # Nguy cơ cơ bản dựa trên tuổi và cholesterol
-    base_risk = (age * 0.4 + cholesterol * 0.2) / 100
+    base_risk = (age * 0.4 + cholesterol * 0.2 + bp * 0.1) / 100
+    
+    # Thêm yếu tố hành vi
+    base_risk += 0.1 * smoking
+    base_risk -= 0.05 * exercise_high
+    base_risk += 0.15 * high_bp_flag
     
     # Thêm yếu tố ngẫu nhiên và điều chỉnh
     np.random.seed(42)
-    risk_score = np.clip(base_risk + np.random.uniform(-0.1, 0.1), 0.1, 0.9)
+    risk_score = np.clip(base_risk + np.random.uniform(-0.1, 0.1), 0.05, 0.95)
     
     # Dự đoán (0: Thấp/Không, 1: Cao/Có)
     prediction = 1 if risk_score >= 0.5 else 0
     
-    # Mô phỏng giải thích (LIME/SHAP style)
+    # --- MOCK SHAP VALUES ---
+    mock_shap_values = {
+        'Tuổi': 0.007 * age - 0.3, # Luôn dương và tăng theo tuổi
+        'Mức Cholesterol': 0.0015 * cholesterol - 0.2, # Luôn dương và tăng theo Cholesterol
+        'Huyết áp': 0.001 * bp - 0.15,
+        'BMI': features[3] * 0.002,
+        'Hút thuốc': 0.25 * smoking, 
+        'Tiền sử gia đình': 0.15 * features[9],
+        'Tập thể dục Cao': -0.2 * exercise_high, # Rất âm nếu tập thể dục cao
+        'Stress Level_Medium': 0.08 * features[18],
+        'Đường huyết đói': 0.001 * features[5]
+    }
+    
+    # --- MOCK EXPLANATION ---
     if prediction == 1:
         result_text = "Nguy cơ **CAO** mắc bệnh tim."
         color = "red"
         explanation = f"""
-        **Giải thích XAI (Mô phỏng):**
-        - **{age:.0f} tuổi:** Yếu tố đóng góp quan trọng nhất (ảnh hưởng **+25%**).
-        - **Cholesterol {cholesterol:.1f}:** Yếu tố tăng nguy cơ (**+15%**).
-        - **Tiền sử gia đình:** Đóng góp thêm **+10%**.
-        - **Nguy cơ thấp:** Tập thể dục Cao (ảnh hưởng **-5%**).
+        Kết quả này được thúc đẩy bởi các yếu tố sau:
+        - **Tuổi {age:.0f}:** Yếu tố đóng góp mạnh mẽ nhất, đặc biệt khi trên 60 tuổi.
+        - **Mức Cholesterol {cholesterol:.1f} mg/dL:** Là yếu tố sinh học tăng nguy cơ quan trọng.
+        - **Hành vi (Hút thuốc/Tiền sử):** Nếu có, yếu tố này đóng góp đáng kể.
+        Mô hình đề xuất cần theo dõi chặt chẽ và tham khảo ý kiến bác sĩ.
         """
     else:
         result_text = "Nguy cơ **THẤP** mắc bệnh tim."
         color = "green"
         explanation = f"""
-        **Giải thích XAI (Mô phỏng):**
-        - **Tuổi {age:.0f}:** Yếu tố đóng góp nhưng bị bù trừ.
-        - **Tập thể dục Cao:** Yếu tố giảm nguy cơ quan trọng nhất (ảnh hưởng **-20%**).
-        - **Không hút thuốc:** Yếu tố giảm nguy cơ (**-10%**).
+        Nguy cơ thấp là nhờ sự kết hợp của:
+        - **Tập thể dục Cao:** Yếu tố giảm nguy cơ quan trọng nhất.
+        - **Không hút thuốc:** Giảm đáng kể đóng góp nguy cơ.
+        - **Chỉ số sinh học ổn định:** Mức Cholesterol và Huyết áp nằm trong phạm vi chấp nhận được.
+        Hãy duy trì thói quen sinh hoạt lành mạnh này!
         """
     
-    return prediction, risk_score, result_text, color, explanation
+    # Trả về kết quả và mô phỏng SHAP
+    return prediction, risk_score, result_text, color, explanation, mock_shap_values
 
 # ==============================================================================
 # PHẦN CHỌN MÔ HÌNH VÀ DỰ ĐOÁN
@@ -278,10 +350,7 @@ with col_predict:
         X_processed, feature_names = preprocess_input(input_data)
         
         # 3. Dự đoán (MÔ PHỎNG)
-        # Thay thế bằng: y_pred = model.predict(X_processed)
-        # Thay thế bằng: y_proba = model.predict_proba(X_processed)[:, 1]
-        
-        prediction, risk_score, result_text, color, explanation = mock_predict_and_explain(model_choice, X_processed[0])
+        prediction, risk_score, result_text, color, explanation, mock_shap_values = mock_predict_and_explain(model_choice, X_processed[0])
 
         st.markdown("### Kết quả Dự đoán")
         st.markdown(f"<div style='background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid {color};'>"
@@ -289,11 +358,16 @@ with col_predict:
                     f"<p>Xác suất Nguy cơ Tim mạch: <span style='color: {color}; font-weight: bold;'>{risk_score*100:.2f}%</span></p>"
                     f"</div>", unsafe_allow_html=True)
         
-        # 4. Hiển thị Giải thích XAI
+        # 4. Hiển thị Giải thích XAI (Văn bản)
         st.markdown("### 💡 Giải thích Mô hình (XAI)")
         st.info(explanation)
         
-        st.markdown(f"*(Lưu ý: Kết quả được tạo ra bằng mô phỏng, không phải từ mô hình học máy thực tế.)*")
+        # 5. Hiển thị Biểu đồ SHAP (Mô phỏng)
+        st.markdown("### 📈 Biểu đồ Đóng góp Đặc trưng (SHAP - Mô phỏng)")
+        shap_plot_buffer = generate_mock_shap_plot(mock_shap_values)
+        st.image(shap_plot_buffer, caption='Biểu đồ SHAP Summary (Mô phỏng)')
+        
+        st.markdown(f"*(Lưu ý: Kết quả và biểu đồ được tạo ra bằng mô phỏng, không phải từ mô hình học máy thực tế.)*")
 
 # Thêm ghi chú về các giá trị ánh xạ để người dùng dễ hiểu
 st.markdown("---")
