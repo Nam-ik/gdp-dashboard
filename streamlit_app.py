@@ -1,151 +1,145 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# Thiết lập cấu hình trang
+st.set_page_config(layout="wide")
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# Tiêu đề ứng dụng
+st.header("Ứng dụng Dự đoán Bệnh Khô Mắt - Giải thích XAI")
+st.markdown("Nhập thông tin bên dưới để dự đoán nguy cơ mắt:")
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# --- Thiết lập 2 cột chính cho đầu vào ---
+col1, col2 = st.columns(2)
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
-
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
-
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
-
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
+with col1:
+    st.subheader("Nhập thông tin cơ bản:")
+    
+    # Giới tính (st.radio)
+    st.markdown("**Giới tính**")
+    gioi_tinh = st.radio(
+        "", 
+        options=("Nam", "Nữ"), 
+        index=0, # Nam được chọn mặc định
+        horizontal=True,
+        key="gioi_tinh"
     )
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+    # Tuổi (st.number_input)
+    tuoi = st.number_input(
+        "**Tuổi**", 
+        min_value=1, 
+        max_value=120, 
+        value=30, 
+        step=1,
+        key="tuoi"
+    )
 
-    return gdp_df
+    # Thời gian ngủ (st.slider)
+    thoi_gian_ngu = st.slider(
+        "**Thời gian ngủ (giờ)**", 
+        min_value=0, 
+        max_value=12, 
+        value=7, 
+        step=1,
+        key="thoi_gian_ngu"
+    )
 
-gdp_df = get_gdp_data()
+    # Màn hình thời gian (st.slider)
+    man_hinh_thoi_gian = st.slider(
+        "**Màn hình thời gian (giờ)**", 
+        min_value=0, 
+        max_value=16, 
+        value=8, 
+        step=1,
+        key="man_hinh_thoi_gian"
+    )
 
-# -----------------------------------------------------------------------------
-# Draw the actual page
+    # Chất lượng giấc ngủ (st.slider)
+    chat_luong_giac_ngu = st.slider(
+        "**Chất lượng giấc ngủ (0-5)**", 
+        min_value=0, 
+        max_value=5, 
+        value=3, 
+        step=1,
+        key="chat_luong_giac_ngu"
+    )
 
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
+    # Mức độ dị ứng (st.slider)
+    muc_do_di_ung = st.slider(
+        "**Mức độ dị ứng (0-5)**", 
+        min_value=0, 
+        max_value=5, 
+        value=3, 
+        step=1,
+        key="muc_do_di_ung"
+    )
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
+with col2:
+    st.subheader("Thông tin hành vi và triệu chứng:")
+    
+    # Số bước/ngày (st.number_input) - Giả sử 5000 là giá trị mặc định
+    so_buoc_ngay = st.number_input(
+        "**Số bước/ngày**", 
+        min_value=0, 
+        value=5000, 
+        step=100,
+        key="so_buoc_ngay"
+    )
 
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
+    # Hoạt động thể chất (st.number_input)
+    hoat_dong_the_chat = st.number_input(
+        "**Hoạt động thể chất (phút)**", 
+        min_value=0, 
+        value=30, 
+        step=5,
+        key="hoat_dong_the_chat"
+    )
+    
+    st.write("---") # Đường kẻ phân chia
+    
+    # Các câu hỏi Checkbox
+    hut_thuoc = st.checkbox("Hút thuốc?", key="hut_thuoc")
+    thiet_bi_khi_ngu = st.checkbox("Sử dụng thiết bị trước khi ngủ?", key="thiet_bi_khi_ngu")
+    roi_loan_giac_ngu = st.checkbox("Có rối loạn giấc ngủ không?", key="roi_loan_giac_ngu")
+    anh_sang_xanh = st.checkbox("Sử dụng ánh sáng xanh của kính lọc?", key="anh_sang_xanh")
+    kho_chiu_trong_mat = st.checkbox("Cảm giác khó chịu trong mắt?", key="kho_chiu_trong_mat")
+    do_mat = st.checkbox("Đỏ mắt?", key="do_mat")
+    ngua_khe_chua = st.checkbox("Ngứa/Khó chịu?", key="ngua_khe_chua")
 
 
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
+# --- Chọn Mô hình và Dự đoán (Nằm ở cuối trang) ---
+st.markdown("---")
+st.subheader("Chọn mô hình để dự đoán:")
 
-st.header(f'GDP in {to_year}', divider='gray')
+# Chia cột cho lựa chọn mô hình và nút dự đoán
+col_model_select, col_predict = st.columns([1, 1])
 
-''
+with col_model_select:
+    # Lựa chọn mô hình
+    model_choice = st.radio(
+        "",
+        options=("Dự đoán với Rừng ngẫu nhiên", "Dự đoán với XGB"),
+        index=0,
+        horizontal=True,
+        key="model_choice"
+    )
 
-cols = st.columns(4)
+with col_predict:
+    # Nút Dự đoán
+    # Sử dụng st.button bên trong cột
+    if st.button("Dự đoán", help="Nhấn để chạy mô hình và xem kết quả"):
+        
+        # --- Phần này chỉ là mô phỏng kết quả dự đoán ---
+        st.success(f"Đã chạy dự đoán với mô hình **{model_choice}**!")
+        st.info("Kết quả dự đoán: Nguy cơ Trung Bình (Đây là kết quả mô phỏng, cần tích hợp mô hình thực tế để chạy)")
+        
+        # In các giá trị đầu vào để kiểm tra
+        # st.write({
+        #     "Giới tính": gioi_tinh,
+        #     "Tuổi": tuoi,
+        #     "Thời gian ngủ": thoi_gian_ngu,
+        #     "Hút thuốc": hut_thuoc
+        # })
 
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+# Để chạy ứng dụng, lưu file này là `app.py` và chạy lệnh:
+# streamlit run app.py
