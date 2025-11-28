@@ -1,14 +1,10 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt # Thư viện để vẽ biểu đồ
-import io # Thư viện để xử lý dữ liệu hình ảnh trong bộ nhớ
-
-# NOTE: Để chạy được ứng dụng này với mô hình thực tế, bạn sẽ cần:
-# 1. Huấn luyện mô hình XGBoost (hoặc Random Forest) ngoài file này.
-# 2. Lưu mô hình (ví dụ: bằng joblib hoặc pickle).
-# 3. Tải mô hình đã lưu tại đây (ví dụ: model = joblib.load('best_xgb_model.pkl'))
-# Do hạn chế của môi trường, chúng tôi chỉ mô phỏng kết quả dự đoán.
+# Cần cài đặt matplotlib: pip install matplotlib
+import matplotlib.pyplot as plt 
+import io 
 
 # Thiết lập cấu hình trang
 st.set_page_config(layout="wide")
@@ -143,11 +139,11 @@ def preprocess_input(input_data):
     feature_names = [
         'Age', 'Blood Pressure', 'Cholesterol Level', 'BMI', 'Sleep Hours', 
         'Fasting Blood Sugar', 
-        'Gender_Female', 'Gender_Male', 
-        'Smoking', 'Family Heart Disease', 'Diabetes', 
-        'High Blood Pressure', 'Low HDL Cholesterol', 'High LDL Cholesterol',
-        'Exercise Habits_Low', 'Exercise Habits_Medium', 'Exercise Habits_High', 
-        'Stress Level_Low', 'Stress Level_Medium', 'Stress Level_High',
+        'Gender_Female', 'Gender_Male', # OHE cho Giới tính
+        'Smoking', 'Family Heart Disease', 'Diabetes', # Checkbox 1
+        'High Blood Pressure', 'Low HDL Cholesterol', 'High LDL Cholesterol', # Checkbox 2
+        'Exercise Habits_Low', 'Exercise Habits_Medium', 'Exercise Habits_High', # OHE cho Exercise Habits
+        'Stress Level_Low', 'Stress Level_Medium', 'Stress Level_High', # OHE cho Stress Level
     ]
 
     # Khởi tạo ma trận đặc trưng với các giá trị 0
@@ -197,59 +193,53 @@ def preprocess_input(input_data):
     return X.reshape(1, -1), feature_names
 
 def generate_mock_shap_plot(shap_values_dict):
-    """Generates a mock SHAP summary plot (horizontal bar chart)."""
+    """Tạo biểu đồ tổng hợp SHAP mô phỏng (biểu đồ thanh ngang)."""
     
-    # Sort features based on absolute SHAP value magnitude
+    # Sắp xếp các đặc trưng dựa trên độ lớn tuyệt đối của giá trị SHAP
     sorted_features = sorted(shap_values_dict.items(), key=lambda item: abs(item[1]), reverse=True)
     
-    # Take the top 7 features
+    # Chỉ lấy 7 đặc trưng quan trọng nhất
     top_n = 7
     top_features = sorted_features[:top_n]
     
-    # Extract names and values for plotting
+    # Trích xuất tên và giá trị để vẽ biểu đồ
     names = [f[0] for f in top_features]
     values = [f[1] for f in top_features]
     
-    # Determine colors for positive (risk increase) and negative (risk decrease)
-    # Giả sử giá trị SHAP dương -> Tăng nguy cơ (Đỏ); Giá trị SHAP âm -> Giảm nguy cơ (Xanh)
+    # Xác định màu sắc: Dương (Tăng nguy cơ -> Đỏ); Âm (Giảm nguy cơ -> Xanh)
     colors = ['red' if v > 0 else 'blue' for v in values]
     
-    # Reverse order for plotting (most important at top)
+    # Đảo ngược thứ tự để đặc trưng quan trọng nhất nằm ở trên cùng
     names.reverse()
     values.reverse()
     colors.reverse()
 
+    # Thiết lập Matplotlib figure
     fig, ax = plt.subplots(figsize=(8, 6))
     
-    # Plot bars
+    # Vẽ biểu đồ thanh
     ax.barh(names, values, color=colors)
     
-    # Add labels and title
+    # Thêm nhãn và tiêu đề
     ax.set_xlabel("Đóng góp vào Nguy cơ (Giá trị SHAP)")
     ax.set_ylabel("Đặc trưng")
     ax.set_title("7 Yếu tố Quan trọng nhất cho Dự đoán (Mô phỏng SHAP)")
     
-    # Add custom legend for color interpretation
+    # Thêm chú thích tùy chỉnh
     red_patch = plt.Rectangle((0, 0), 1, 1, fc="red", label='Tăng nguy cơ')
     blue_patch = plt.Rectangle((0, 0), 1, 1, fc="blue", label='Giảm nguy cơ')
     ax.legend(handles=[red_patch, blue_patch], loc='lower right', frameon=True)
 
-    # Use BytesIO to save the plot as an image in memory
+    # Lưu biểu đồ vào bộ nhớ
     buf = io.BytesIO()
     plt.tight_layout()
     plt.savefig(buf, format="png")
-    plt.close(fig) # Close the figure to free memory
+    plt.close(fig) # Đóng figure để giải phóng bộ nhớ
     
     return buf
 
 def mock_predict_and_explain(model_name, features):
     """Mô phỏng kết quả dự đoán, xác suất và giải thích XAI."""
-    
-    # Tên đặc trưng được sử dụng trong giải thích
-    feature_map = {
-        0: 'Tuổi', 1: 'Huyết áp', 2: 'Mức Cholesterol', 3: 'BMI', 
-        8: 'Hút thuốc', 11: 'Cao huyết áp', 16: 'Tập thể dục Cao', 18: 'Stress Trung bình'
-    }
     
     # Trích xuất các giá trị quan trọng cho mô phỏng
     age = features[0]
@@ -275,14 +265,15 @@ def mock_predict_and_explain(model_name, features):
     prediction = 1 if risk_score >= 0.5 else 0
     
     # --- MOCK SHAP VALUES ---
+    # Tạo giá trị SHAP mô phỏng dựa trên đầu vào
     mock_shap_values = {
-        'Tuổi': 0.007 * age - 0.3, # Luôn dương và tăng theo tuổi
-        'Mức Cholesterol': 0.0015 * cholesterol - 0.2, # Luôn dương và tăng theo Cholesterol
+        'Tuổi': 0.007 * age - 0.3, 
+        'Mức Cholesterol': 0.0015 * cholesterol - 0.2, 
         'Huyết áp': 0.001 * bp - 0.15,
         'BMI': features[3] * 0.002,
         'Hút thuốc': 0.25 * smoking, 
         'Tiền sử gia đình': 0.15 * features[9],
-        'Tập thể dục Cao': -0.2 * exercise_high, # Rất âm nếu tập thể dục cao
+        'Tập thể dục Cao': -0.2 * exercise_high, 
         'Stress Level_Medium': 0.08 * features[18],
         'Đường huyết đói': 0.001 * features[5]
     }
@@ -293,7 +284,7 @@ def mock_predict_and_explain(model_name, features):
         color = "red"
         explanation = f"""
         Kết quả này được thúc đẩy bởi các yếu tố sau:
-        - **Tuổi {age:.0f}:** Yếu tố đóng góp mạnh mẽ nhất, đặc biệt khi trên 60 tuổi.
+        - **Tuổi {age:.0f}:** Yếu tố đóng góp mạnh mẽ nhất, đặc biệt khi trên 60 tuổi (SHAP dương lớn).
         - **Mức Cholesterol {cholesterol:.1f} mg/dL:** Là yếu tố sinh học tăng nguy cơ quan trọng.
         - **Hành vi (Hút thuốc/Tiền sử):** Nếu có, yếu tố này đóng góp đáng kể.
         Mô hình đề xuất cần theo dõi chặt chẽ và tham khảo ý kiến bác sĩ.
@@ -303,7 +294,7 @@ def mock_predict_and_explain(model_name, features):
         color = "green"
         explanation = f"""
         Nguy cơ thấp là nhờ sự kết hợp của:
-        - **Tập thể dục Cao:** Yếu tố giảm nguy cơ quan trọng nhất.
+        - **Tập thể dục Cao:** Yếu tố giảm nguy cơ quan trọng nhất (SHAP âm lớn).
         - **Không hút thuốc:** Giảm đáng kể đóng góp nguy cơ.
         - **Chỉ số sinh học ổn định:** Mức Cholesterol và Huyết áp nằm trong phạm vi chấp nhận được.
         Hãy duy trì thói quen sinh hoạt lành mạnh này!
